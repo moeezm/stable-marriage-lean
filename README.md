@@ -1,0 +1,99 @@
+# Stable Marriage Problem in Lean
+
+Formalizing the stable marriage problem and the Gale-Shapley algorithm in Lean.
+
+## Project organization
+
+- `StableMarriageLean/Basic.lean`: core definitions (preferences, matchings, stability).
+- `StableMarriageLean/GaleShapley.lean`: Gale-Shapley state machine and algorithm.
+- `StableMarriageLean/Lemmas.lean`: supporting lemmas and invariants.
+- `StableMarriageLean/Properties.lean`: main results about termination and stability.
+- `StableMarriageLean.lean`: root module that re-exports the library.
+- `Main.lean`: small entry point for the executable.
+
+## Theory
+
+### 1. Agents and Preferences
+
+We have two disjoint finite sets:
+
+- $M$: men
+- $W$: women
+
+Each agent $a \in M \cup W$ has a **strict preference ordering** over a subset of the opposite side. Each man $m$ has a preference ordering $P_m$ and each woman $w4 has a preference ordering $P_w$. We will denote "prefers to" by $\succ$, indexed by the agent when needed. We do not consider ties here, although there is a generalization to ties.
+
+### 2. Acceptability
+
+A pair $(m, w) \in M \times W$ is **acceptable** iff:
+
+$$
+w \in P_m \quad \text{and} \quad m \in P_w
+$$
+
+If either side does not list the other, the pair is **unacceptable**.
+
+Unacceptable partners are treated as **worse than being unmatched**.
+
+### 3. Matchings
+
+A **matching** $\mu$ is a partial function:
+
+$$
+\mu : M \cup W \to M \cup W \cup \{\varnothing\}
+$$
+
+such that:
+
+- $\mu(m) \in W \cup \{\varnothing\}$
+- $\mu(w) \in M \cup \{\varnothing\}$
+- $\mu(m) = w \iff \mu(w) = m$ (consistency)
+- Each agent is matched with **at most one** partner
+
+Agents mapped to $\varnothing$ are **unmatched**.
+
+In Lean, we represent a matching as two functions (menMatches and womenMatches),
+and add a consistency predicate to recover this single-function view.
+
+### 4. Individual Rationality
+
+A matching $\mu$ is **individually rational** iff:
+
+$$
+\forall a,\; \mu(a) \in P_a \cup \{\varnothing\}
+$$
+
+In other words, no agent is matched to an unacceptable partner.
+
+### 5. Preference Over Being Unmatched
+
+For every agent $a$:
+
+$$
+\text{any acceptable partner } \succ \varnothing
+$$
+
+Being unmatched is worse than any acceptable match.
+
+### 6. Blocking Pairs
+
+A pair $(m, w)$ is a **blocking pair** for a matching $\mu$ iff:
+
+1. $(m, w)$ is acceptable
+2. $m$ prefers $w$ to $\mu(m)$
+3. $w$ prefers $m$ to $\mu(w)$
+
+Formally:
+
+$$
+w \succ_m \mu(m) \quad \text{and} \quad m \succ_w \mu(w)
+$$
+
+This includes cases where one or both agents are currently unmatched.
+
+### 7. Stability
+
+A matching $\mu$ is **stable** iff:
+
+1. It is **consistent**,
+2. It is **individually rational**, and
+3. It has **no blocking pairs**
