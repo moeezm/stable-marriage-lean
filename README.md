@@ -106,4 +106,4 @@ A matching $\mu$ is **stable** iff:
 
 ### 8. Gale-Shapley algorithm
 
-Gale and Shapley (1962) gave a beautiful
+Gale and Shapley (1962) gave a beautiful algorithm, the deferred acceptance algorithm, which they prove yields a stable matching. The proof is quite short and extremely intuitive. (The formalization is of course much more difficult than their elegant proof.)
