@@ -27,7 +27,8 @@ theorem galeShapley_terminates (P : Problem) :
         proposalBound P := by
     exact proposedCount_runSteps_eq_of_not_terminated P _ hnot
   have hlt' : proposalBound P < proposalBound P := by
-    simpa [hcount] using hlt
+    have hlt' := hlt
+    simp [hcount] at hlt'
   exact (lt_irrefl _ hlt')
 
 -- The output matching is individually rational.
@@ -99,7 +100,7 @@ theorem galeShapley_noBlockingPairs (P : Problem) :
       have hnotacc : ¬ P.womenPrefs.acceptable w m :=
         hrej _ _ hwmatch hprop
       have : ¬ prefersOpt P.womenPrefs w (some m) none := by
-        simpa [prefersOpt, hnotacc]
+        simp [prefersOpt, hnotacc]
       exact (this (by simpa [hwmatch] using hwompref')).elim
   | some mW =>
       by_cases hEq : m = mW

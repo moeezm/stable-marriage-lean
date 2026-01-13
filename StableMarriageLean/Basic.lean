@@ -72,14 +72,14 @@ theorem prefersOpt_none_over_unacceptable
     (p : Preferences Agent Partner) (a : Agent) (o : Partner) :
     ¬ p.acceptable a o → prefersOpt p a none (some o) := by
   intro hacc
-  simpa [prefersOpt, hacc]
+  simp [prefersOpt, hacc]
 
 -- Any acceptable partner is better than being unmatched.
 theorem prefersOpt_acceptable_over_none
     (p : Preferences Agent Partner) (a : Agent) (o : Partner) :
     p.acceptable a o → prefersOpt p a (some o) none := by
   intro hacc
-  simpa [prefersOpt, hacc]
+  simp [prefersOpt, hacc]
 
 -- Any acceptable partner is better than any unacceptable one.
 theorem prefersOpt_acceptable_over_unacceptable

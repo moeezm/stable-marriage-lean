@@ -43,8 +43,10 @@ lemma prefersOpt_asymm {Agent Partner : Type*} (p : Preferences Agent Partner)
       have h21' : p.prefers a o2 o1 := by
         simpa [prefersOpt, hacc2, hacc1] using h21
       exact (prefers_asymm p a o1 o2 h12') h21'
-    · exact (by simpa [prefersOpt, hacc2] using h21)
-  · exact (by simpa [prefersOpt, hacc1] using h12)
+    ·
+      simp [prefersOpt, hacc2] at h21
+  ·
+    simp [prefersOpt, hacc1] at h12
 
 -- With acceptable partners, prefersOpt matches the base preference relation.
 lemma prefersOpt_some_some_iff {Agent Partner : Type*} (p : Preferences Agent Partner)
@@ -105,7 +107,7 @@ lemma proposedSet_stepWith
   ext mw
   cases mw with
   | mk m' w' =>
-      simp [proposedSet, stepWith_proposed, or_left_comm, or_assoc, or_comm]
+      simp [proposedSet, stepWith_proposed, or_comm]
 
 -- If (m, w) was not proposed, stepWith increases the count by one.
 lemma proposedCount_stepWith
@@ -114,7 +116,7 @@ lemma proposedCount_stepWith
     proposedCount P (GSState.stepWith P σ m w) = proposedCount P σ + 1 := by
   classical
   have hmem : (m, w) ∉ proposedSet P σ := by
-    simpa [proposedSet, hnew]
+    simp [proposedSet, hnew]
   simpa [proposedCount, proposedSet_stepWith] using
     (Finset.card_insert_of_notMem (a := (m, w)) (s := proposedSet P σ) hmem)
 
@@ -201,9 +203,9 @@ lemma menAcceptable_stepWith
               (Matching.swapMatch P σ.matching m' mOld w).menMatches m' = some w' := by
             simpa [GSState.stepWith, hw, hpref] using hmatch
           by_cases hmOld : mOld = m'
-          · have : (none : Option P.Women) = some w' := by
-              simpa [Matching.swapMatch, hmOld] using hmatch'
-            cases this
+          ·
+            have hmatch'' := hmatch'
+            simp [Matching.swapMatch, hmOld] at hmatch''
           · have : w' = w := by
               have hmOld' : m' ≠ mOld := by
                 simpa [eq_comm] using hmOld
@@ -212,12 +214,11 @@ lemma menAcceptable_stepWith
             exact hacc
         · by_cases hmOld : m' = mOld
           · subst hmOld
-            have : (none : Option P.Women) = some w' := by
-              have hmatch' :
-                  (Matching.swapMatch P σ.matching m m' w).menMatches m' = some w' := by
-                simpa [GSState.stepWith, hw, hpref] using hmatch
-              simpa [Matching.swapMatch, hm, eq_comm] using hmatch'
-            cases this
+            have hmatch' :
+                (Matching.swapMatch P σ.matching m m' w).menMatches m' = some w' := by
+              simpa [GSState.stepWith, hw, hpref] using hmatch
+            have hmatch'' := hmatch'
+            simp [Matching.swapMatch] at hmatch''
           · have hmatch' : σ.matching.menMatches m' = some w' := by
               have hmatch' :
                   (Matching.swapMatch P σ.matching m mOld w).menMatches m' = some w' := by
@@ -296,16 +297,16 @@ lemma consistent_matchUnmatched
     · have hw'' : w ≠ w' := by simpa [eq_comm] using hw'
       have hno : μ.womenMatches w' ≠ some m := by
         intro hmw
-        have := (hcons m w').2 hmw
-        simpa [hm] using this
-      simp [Matching.matchUnmatched, hm', hw', hw'', hno, hm]
+        have h := (hcons m w').2 hmw
+        simp [hm] at h
+      simp [Matching.matchUnmatched, hm', hw', hw'', hno]
   · by_cases hw' : w' = w
     · have hm'' : m ≠ m' := by simpa [eq_comm] using hm'
       have hno : μ.menMatches m' ≠ some w := by
         intro hmw
-        have := (hcons m' w).1 hmw
-        simpa [hw] using this
-      simp [Matching.matchUnmatched, hm', hw', hm'', hno, hw]
+        have h := (hcons m' w).1 hmw
+        simp [hw] at h
+      simp [Matching.matchUnmatched, hm', hw', hm'', hno]
     · simpa [Matching.matchUnmatched, hm', hw'] using (hcons m' w')
 
 -- Swapping a woman's partner preserves consistency.
@@ -317,8 +318,8 @@ lemma consistent_swapMatch
   have hmne : m ≠ mOld := by
     intro hmeq
     subst hmeq
-    have : μ.menMatches m = some w := (hcons m w).2 hw
-    simpa [hm] using this
+    have h := (hcons m w).2 hw
+    simp [hm] at h
   have hOld : μ.menMatches mOld = some w := (hcons mOld w).2 hw
   intro m' w'
   by_cases hm' : m' = m
@@ -327,12 +328,12 @@ lemma consistent_swapMatch
     · have hw'' : w ≠ w' := by simpa [eq_comm] using hw'
       have hno : μ.womenMatches w' ≠ some m := by
         intro hmw
-        have := (hcons m w').2 hmw
-        simpa [hm] using this
+        have h := (hcons m w').2 hmw
+        simp [hm] at h
       simp [Matching.swapMatch, hm', hw', hw'', hno, hmne]
   · by_cases hOldm : m' = mOld
     · by_cases hw' : w' = w
-      · simp [Matching.swapMatch, hm', hOldm, hw', hmne]
+      · simp [Matching.swapMatch, hOldm, hw', hmne]
       · have hw'' : w ≠ w' := by simpa [eq_comm] using hw'
         have hno : μ.womenMatches w' ≠ some mOld := by
           intro hmw
@@ -341,7 +342,7 @@ lemma consistent_swapMatch
           have hEq : some w' = some w := by simpa [h1] using h2
           cases hEq
           exact hw'' rfl
-        simp [Matching.swapMatch, hm', hOldm, hw', hw'', hno, hmne]
+        simp [Matching.swapMatch, hOldm, hw', hno]
     · by_cases hw' : w' = w
       · have hm'' : m ≠ m' := by simpa [eq_comm] using hm'
         have hno : μ.menMatches m' ≠ some w := by
@@ -349,7 +350,7 @@ lemma consistent_swapMatch
           have := (hcons m' w).1 hmw
           have : mOld = m' := by simpa [hw] using this
           exact hOldm this.symm
-        simp [Matching.swapMatch, hm', hOldm, hw', hm'', hno, hmne]
+        simp [Matching.swapMatch, hm', hOldm, hw', hm'', hno]
       · simpa [Matching.swapMatch, hm', hOldm, hw'] using (hcons m' w')
 
 -- A concrete proposal step preserves consistency.
@@ -480,7 +481,7 @@ lemma step_menProposedDownward
     cases hprop' with
     | inl hpropOld =>
         have hpropOld' := hdown _ _ _ hpropOld hpref
-        simpa [GSState.step, hfree, m, w, stepWith_proposed, hpropOld']
+        simp [GSState.step, hfree, stepWith_proposed, hpropOld']
     | inr hnew =>
         rcases hnew with ⟨hm', hw'⟩
         subst hm'
@@ -492,7 +493,7 @@ lemma step_menProposedDownward
           have hmem : w'' ∈ candidateWomen P σ m := by
             simp [candidateWomen, hacc, hnot]
           exact (chooseMaxCandidate_no_better P σ m hm.2 _ hmem hpref)
-        simpa [GSState.step, hfree, m, w, stepWith_proposed, hpropOld']
+        simp [GSState.step, hfree, stepWith_proposed, hpropOld']
   ·
     simpa [GSState.step, hfree] using hdown
 
@@ -541,12 +542,12 @@ lemma stepWith_menMatchedProposed
               simpa [GSState.stepWith, hw, hpref] using hmatch
             simpa [Matching.matchUnmatched, hm] using hmatch'
           have hprop' := hprop _ _ hmatch'
-          simpa [stepWith_proposed, hprop']
+          simp [stepWith_proposed, hprop']
       ·
         have hmatch' : σ.matching.menMatches m' = some w' := by
           simpa [stepWith_matching_eq_of_reject_none P σ m w hw hpref] using hmatch
         have hprop' := hprop _ _ hmatch'
-        simpa [stepWith_proposed, hprop']
+        simp [stepWith_proposed, hprop']
   | some mOld =>
       by_cases hpref : prefersOpt P.womenPrefs w (some m) (some mOld)
       · by_cases hm : m' = m
@@ -557,7 +558,8 @@ lemma stepWith_menMatchedProposed
           by_cases hmOld : mOld = m
           · cases hmOld
             have : (none : Option P.Women) = some w' := by
-              simpa [Matching.swapMatch] using hmatch'
+              have hmatch'' := hmatch'
+              simp [Matching.swapMatch] at hmatch''
             cases this
           · have : w' = w := by
               have hmOld' : m ≠ mOld := by
@@ -571,7 +573,8 @@ lemma stepWith_menMatchedProposed
               have hmatch' :
                   (Matching.swapMatch P σ.matching m m' w).menMatches m' = some w' := by
                 simpa [GSState.stepWith, hw, hpref] using hmatch
-              simpa [Matching.swapMatch, hm, eq_comm] using hmatch'
+              have hmatch'' := hmatch'
+              simp [Matching.swapMatch] at hmatch''
             cases this
           · have hmatch' : σ.matching.menMatches m' = some w' := by
               have hmatch' :
@@ -579,12 +582,12 @@ lemma stepWith_menMatchedProposed
                 simpa [GSState.stepWith, hw, hpref] using hmatch
               simpa [Matching.swapMatch, hm, hmOld] using hmatch'
             have hprop' := hprop _ _ hmatch'
-            simpa [stepWith_proposed, hprop']
+            simp [stepWith_proposed, hprop']
       ·
         have hmatch' : σ.matching.menMatches m' = some w' := by
           simpa [stepWith_matching_eq_of_reject_some P σ m w mOld hw hpref] using hmatch
         have hprop' := hprop _ _ hmatch'
-        simpa [stepWith_proposed, hprop']
+        simp [stepWith_proposed, hprop']
 
 -- A generic step preserves the property that matches are proposed.
 lemma step_menMatchedProposed
@@ -751,7 +754,7 @@ lemma stepWith_womenBest
                 exact prefersOpt_left_acceptable (p := P.womenPrefs) (a := w) (o1 := m) (o2 := none) hpref
               have hacc'' : ¬ P.womenPrefs.acceptable w m'' := by
                 exact hrej _ _ hw hpropOld
-              simpa [prefersOpt, haccm, hacc''] 
+              simp [prefersOpt, haccm, hacc'']
           | inr hnew =>
               rcases hnew with ⟨hm'', _⟩
               cases hm''
@@ -770,7 +773,7 @@ lemma stepWith_womenBest
         · cases hw'
           have hmatch' : σ.matching.womenMatches w = some m' := by
             simpa [stepWith_matching_eq_of_reject_none P σ m w hw hpref] using hmatch
-          simpa [hw] using hmatch'
+          simp [hw] at hmatch'
         ·
           have hmatch' : σ.matching.womenMatches w' = some m' := by
             simpa [stepWith_matching_eq_of_reject_none P σ m w hw hpref] using hmatch
@@ -810,7 +813,7 @@ lemma stepWith_womenBest
                 ·
                   have haccm : P.womenPrefs.acceptable w m := by
                     exact prefersOpt_left_acceptable (p := P.womenPrefs) (a := w) (o1 := m) (o2 := some mOld) hpref
-                  simpa [prefersOpt, haccm, hacc''] 
+                  simp [prefersOpt, haccm, hacc'']
           | inr hnew =>
               rcases hnew with ⟨hm'', _⟩
               cases hm''
@@ -857,7 +860,7 @@ lemma stepWith_womenBest
                       simpa [prefersOpt, haccm, haccOld] using hprefNew
                     exact (hpref this).elim
               ·
-                simpa [prefersOpt, haccOld, haccm]
+                simp [prefersOpt, haccOld, haccm]
         ·
           have hmatch' : σ.matching.womenMatches w' = some m' := by
             simpa [stepWith_matching_eq_of_reject_some P σ m w mOld hw hpref] using hmatch
@@ -928,7 +931,7 @@ lemma proposedCount_lt_bound_of_free
       simpa [candidateWomen] using hwmem
     exact hmem.2
   have hnotmem : (m, w) ∉ proposedSet P σ := by
-    simpa [proposedSet, hnew]
+    simp [proposedSet, hnew]
   have hssub : proposedSet P σ ⊂ (Finset.univ : Finset (P.Men × P.Women)) := by
     have hsubset :
         proposedSet P σ ⊆ (Finset.univ : Finset (P.Men × P.Women)) := by
@@ -968,7 +971,7 @@ lemma runSteps_eq_of_terminated
       calc
         GSState.runSteps P (n + Nat.succ k) =
             GSState.step P (GSState.runSteps P (n + k)) := by
-              simp [GSState.runSteps, Nat.add_succ]
+              simp [GSState.runSteps]
         _ = GSState.runSteps P (n + k) := by
               simpa using step_eq_of_terminated P _ hterm
         _ = GSState.runSteps P n := ih
@@ -1000,7 +1003,7 @@ lemma proposedCount_runSteps_eq_of_not_terminated
               simpa [GSState.runSteps] using
                 proposedCount_step_of_free P _ hfree
         _ = n + 1 := by
-              simpa [ih hnot']
+              simp [ih hnot']
 
 end
 
