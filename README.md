@@ -1,6 +1,8 @@
 # Stable Marriage Problem in Lean
 
-Formalizing the stable marriage problem and the Gale-Shapley algorithm in Lean.
+Formalizing the stable marriage problem and the Gale-Shapley algorithm in Lean. See the famous paper [College admissions and the stability of marriage](https://sites.math.washington.edu/~billey/classes/562.winter.2018/articles/Gale.Shapley.pdf) by Gale and Shapley (1962) for an extremely readable introduction to the problem.
+
+You may also enjoy _Two-Sided Matching: A Study in Game-Theoretic Modeling and Analysis_ by Roth and Sotomayor (1990) for a more rigorous theoretical treatment of the problem and its many extensions (e.g., Gale-Shapley do not consider incomplete preferences, whereas this is covered in Roth-Sotomayor, and indeed this formalization uses that setup).
 
 ## Project organization
 
@@ -20,7 +22,7 @@ We have two disjoint finite sets:
 - $M$: men
 - $W$: women
 
-Each agent $a \in M \cup W$ has a **strict preference ordering** over a subset of the opposite side. Each man $m$ has a preference ordering $P_m$ and each woman $w4 has a preference ordering $P_w$. We will denote "prefers to" by $\succ$, indexed by the agent when needed. We do not consider ties here, although there is a generalization to ties.
+Each agent $a \in M \cup W$ has a **strict preference ordering** over a _subset_ of the opposite side (i.e., preferences are incomplete -- in other words, it is not a total order). Each man $m$ has a preference ordering $P_m$ and each woman $w$ has a preference ordering $P_w$. We will denote "prefers to" by $\succ$, indexed by the agent when needed. We do not consider ties here, although there is a generalization to ties in the literature.
 
 ### 2. Acceptability
 
