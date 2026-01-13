@@ -1,8 +1,12 @@
 # Stable Marriage Problem in Lean
 
-Formalizing the stable marriage problem and the Gale-Shapley algorithm in Lean. See the famous paper [College admissions and the stability of marriage](https://sites.math.washington.edu/~billey/classes/562.winter.2018/articles/Gale.Shapley.pdf) by Gale and Shapley (1962) for an extremely readable introduction to the problem.
+Formalizing the stable marriage problem and the Gale-Shapley algorithm in Lean.
 
-You may also enjoy _Two-Sided Matching: A Study in Game-Theoretic Modeling and Analysis_ by Roth and Sotomayor (1990) for a more rigorous theoretical treatment of the problem and its many extensions (e.g., Gale-Shapley do not consider incomplete preferences, whereas this is covered in Roth-Sotomayor, and indeed this formalization uses that setup).
+The stable marriage problem asks for a matching between two sets of agents (say, men and women) that respects their preferences, in a precise sense ("stability"). The algorithm for it, the _deferred acceptance_ algorithm, developed by Gale and Shapley, is perhaps one of the most successful examples of market design in the real world, and is today used to, e.g., match medical residents, students to high schools, etc.
+
+The famous paper [College admissions and the stability of marriage](https://sites.math.washington.edu/~billey/classes/562.winter.2018/articles/Gale.Shapley.pdf) by Gale and Shapley (1962) introduced the problem and is extremely readable. They also develop the deferred acceptance algorithm in it.
+
+For a rigorous theoretical treatment of the problem and its many extensions, see _Two-Sided Matching: A Study in Game-Theoretic Modeling and Analysis_ by Roth and Sotomayor (1990) (e.g., Gale-Shapley do not consider incomplete preferences, whereas this is covered in Roth-Sotomayor, and indeed this formalization uses that setup).
 
 ## Project organization
 
@@ -99,3 +103,7 @@ A matching $\mu$ is **stable** iff:
 1. It is **consistent**,
 2. It is **individually rational**, and
 3. It has **no blocking pairs**
+
+### 8. Gale-Shapley algorithm
+
+Gale and Shapley (1962) gave a beautiful
