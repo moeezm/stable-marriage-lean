@@ -1,3 +1,4 @@
+Rewrote most of the original by hand because I thought I could do better than GPT (shaved off ~300 lines)
 # Stable Marriage Problem in Lean
 
 Formalizing the stable marriage problem and the Gale-Shapley algorithm in Lean.
