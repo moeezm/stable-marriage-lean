@@ -98,20 +98,6 @@ lemma chooseMaxCandidate_is_best (σ : GSState P) (m : P.Men)
     have total := P.menPrefs.prefers_total m w w' w_acceptable w'_acceptable
     grind
 
-lemma matching_match_unmatched_doesnt_modify_anything_else_men (P : Problem) (μ : Matching P) (m : P.Men)
-(m' : P.Men) (h_neq : m' ≠ m): ∀ w : P.Women, (μ.matchUnmatched P m w).menMatches m' = μ.menMatches m' := by
-  intro w
-  unfold Matching.matchUnmatched
-  simp
-  grind
-
-lemma matching_match_unmatched_doesnt_modify_anything_else_women (P : Problem) (μ : Matching P) (w : P.Women)
-(w' : P.Women) (h_neq : w' ≠ w): ∀ m : P.Men, (μ.matchUnmatched P m w).womenMatches w' = μ.womenMatches w' := by
-  intro m
-  unfold Matching.matchUnmatched
-  simp
-  grind
-
 -- consistency
 lemma galeShapley_initial_consistent (P : Problem) : consistent P (GSState.initial P).matching := by
   unfold GSState.initial consistent
@@ -539,10 +525,6 @@ lemma galeShapley_stepWith_woman_better_than_all_candidates_preserves_invariants
         grind
 
   -- proof for w
-  have w_match_either_old_or_m : (new_state.matching.womenMatches w = σ.matching.womenMatches w) ∨
-  (new_state.matching.womenMatches w = (some m)) := by
-    unfold new_state GSState.stepWith Matching.matchUnmatched Matching.swapMatch
-    split <;> split <;> simp
   have w_old_match_acceptable (old_match : P.Men) (is_old_match : σ.matching.womenMatches w = (some old_match)) :
   P.womenPrefs.acceptable w old_match := by
     unfold individuallyRational at h_rational
