@@ -2,26 +2,33 @@ import Mathlib.Data.Finset.Basic
 import Mathlib.Data.Finset.Card
 import Mathlib.Data.Fintype.Card
 import Mathlib.Data.Fintype.Prod
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+import Mathlib.Algebra.BigOperators.Group.Finset.Defs
+import Mathlib.Algebra.Order.BigOperators.Group.Finset
+import Mathlib.Data.Finset.Erase
 import StableMarriageLean.GaleShapley
 
 namespace StableMarriageLean
 
 noncomputable section
 open Classical
+open Mathlib
 
--- If an agent prefers a match, that match is acceptable.
-lemma prefersOpt_left_acceptable {Agent Partner : Type*}
-    (p : Preferences Agent Partner) (a : Agent) (o1 : Partner) (o2 : Option Partner) :
-    prefersOpt p a (some o1) o2 → p.acceptable a o1 := by
-  cases o2 with
+-- utils
+lemma prefersOpt_false_on_equal_inputs (p : Preferences Agent Partner)
+  (a : Agent) (x : Option Partner) : prefersOpt p a x x = False := by
+  unfold prefersOpt
+  cases x with
+  | some y =>
+    simp
+    by_cases acceptable : p.acceptable a y
+    ·
+      simp [acceptable]
+      simp [p.prefers_irrefl]
+    ·
+      grind
   | none =>
-      intro h
-      simpa [prefersOpt] using h
-  | some o2 =>
-      intro h
-      by_cases hacc : p.acceptable a o1
-      · exact hacc
-      · simp [prefersOpt, hacc] at h
+    grind
 
 -- Strict preferences are asymmetric.
 lemma prefers_asymm {Agent Partner : Type*} (p : Preferences Agent Partner)
@@ -48,962 +55,623 @@ lemma prefersOpt_asymm {Agent Partner : Type*} (p : Preferences Agent Partner)
   ·
     simp [prefersOpt, hacc1] at h12
 
--- With acceptable partners, prefersOpt matches the base preference relation.
-lemma prefersOpt_some_some_iff {Agent Partner : Type*} (p : Preferences Agent Partner)
-    (a : Agent) (o1 o2 : Partner) (h1 : p.acceptable a o1) (h2 : p.acceptable a o2) :
-    prefersOpt p a (some o1) (some o2) ↔ p.prefers a o1 o2 := by
-  simp [prefersOpt, h1, h2]
-
--- Two matchings are equal when both match maps agree.
-lemma Matching.ext {P : Problem} {μ ν : Matching P}
-    (hmen : μ.menMatches = ν.menMatches) (hwomen : μ.womenMatches = ν.womenMatches) :
-    μ = ν := by
-  cases μ
-  cases ν
-  cases hmen
-  cases hwomen
-  rfl
-
--- The set of proposed pairs in a state.
-def proposedSet (P : Problem) (σ : GSState P) : Finset (P.Men × P.Women) := by
-  classical
-  letI := P.menFintype
-  letI := P.womenFintype
-  letI : Fintype (P.Men × P.Women) := inferInstance
-  exact Finset.univ.filter (fun mw => σ.proposed mw.1 mw.2)
-
--- The number of proposed pairs in a state.
-def proposedCount (P : Problem) (σ : GSState P) : Nat :=
-  (proposedSet P σ).card
-
--- Membership in the proposed set is just the proposal predicate.
-lemma mem_proposedSet
-    (P : Problem) (σ : GSState P) (mw : P.Men × P.Women) :
-    mw ∈ proposedSet P σ ↔ σ.proposed mw.1 mw.2 := by
-  classical
-  simp [proposedSet]
-
--- The proposed predicate after a stepWith update.
-lemma stepWith_proposed
-    (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women) :
-    (GSState.stepWith P σ m w).proposed =
-      fun m' w' => σ.proposed m' w' ∨ (m' = m ∧ w' = w) := by
-  cases hw : σ.matching.womenMatches w with
-  | none =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) none
-      · simp [GSState.stepWith, hw, hpref]
-      · simp [GSState.stepWith, hw, hpref]
-  | some mOld =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) (some mOld)
-      · simp [GSState.stepWith, hw, hpref]
-      · simp [GSState.stepWith, hw, hpref]
-
--- A stepWith proposal inserts exactly one new pair into the proposed set.
-lemma proposedSet_stepWith
-    (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women) :
-    proposedSet P (GSState.stepWith P σ m w) =
-      insert (m, w) (proposedSet P σ) := by
-  classical
-  ext mw
-  cases mw with
-  | mk m' w' =>
-      simp [proposedSet, stepWith_proposed, or_comm]
-
--- If (m, w) was not proposed, stepWith increases the count by one.
-lemma proposedCount_stepWith
-    (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women)
-    (hnew : ¬ σ.proposed m w) :
-    proposedCount P (GSState.stepWith P σ m w) = proposedCount P σ + 1 := by
-  classical
-  have hmem : (m, w) ∉ proposedSet P σ := by
-    simp [proposedSet, hnew]
-  simpa [proposedCount, proposedSet_stepWith] using
-    (Finset.card_insert_of_notMem (a := (m, w)) (s := proposedSet P σ) hmem)
-
--- The initial state has zero proposals.
-lemma proposedCount_initial (P : Problem) :
-    proposedCount P (GSState.initial P) = 0 := by
-  classical
-  simp [proposedCount, proposedSet, GSState.initial]
-
--- All men matched in a state are acceptable to those men.
-def menAcceptableState (P : Problem) (σ : GSState P) : Prop :=
-  ∀ m w, σ.matching.menMatches m = some w → P.menPrefs.acceptable m w
-
--- All women matched in a state are acceptable to those women.
-def womenAcceptableState (P : Problem) (σ : GSState P) : Prop :=
-  ∀ w m, σ.matching.womenMatches w = some m → P.womenPrefs.acceptable w m
-
--- The initial state is acceptable for men.
-lemma initial_menAcceptable (P : Problem) : menAcceptableState P (GSState.initial P) := by
-  intro m w hmatch
-  simp [GSState.initial] at hmatch
-
--- The initial state is acceptable for women.
-lemma initial_womenAcceptable (P : Problem) : womenAcceptableState P (GSState.initial P) := by
-  intro w m hmatch
-  simp [GSState.initial] at hmatch
-
--- Rejecting a proposal to a free woman leaves the matching unchanged.
-lemma stepWith_matching_eq_of_reject_none
-    (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women)
-    (hw : σ.matching.womenMatches w = none)
-    (hpref : ¬ prefersOpt P.womenPrefs w (some m) none) :
-    (GSState.stepWith P σ m w).matching = σ.matching := by
-  unfold GSState.stepWith
-  have hacc : ¬ P.womenPrefs.acceptable w m := by
-    simpa [prefersOpt] using hpref
-  rw [hw]
-  simp [prefersOpt, hacc]
-
--- Rejecting a proposal to a matched woman leaves the matching unchanged.
-lemma stepWith_matching_eq_of_reject_some
-    (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women) (mOld : P.Men)
-    (hw : σ.matching.womenMatches w = some mOld)
-    (hpref : ¬ prefersOpt P.womenPrefs w (some m) (some mOld)) :
-    (GSState.stepWith P σ m w).matching = σ.matching := by
-  unfold GSState.stepWith
-  rw [hw]
-  simp [if_neg hpref]
-
--- StepWith preserves men's acceptability when the proposer finds the woman acceptable.
-lemma menAcceptable_stepWith
-    (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women)
-    (hacc : P.menPrefs.acceptable m w) (hmen : menAcceptableState P σ) :
-    menAcceptableState P (GSState.stepWith P σ m w) := by
-  classical
-  intro m' w' hmatch
-  cases hw : σ.matching.womenMatches w with
-  | none =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) none
-      · by_cases hm : m' = m
-        · subst hm
-          have hmatch' :
-              (Matching.matchUnmatched P σ.matching m' w).menMatches m' = some w' := by
-            simpa [GSState.stepWith, hw, hpref] using hmatch
-          have : w' = w := by
-            simpa [Matching.matchUnmatched, eq_comm] using hmatch'
-          subst this
-          exact hacc
-        · have hmatch' : σ.matching.menMatches m' = some w' := by
-            have hmatch' :
-                (Matching.matchUnmatched P σ.matching m w).menMatches m' = some w' := by
-              simpa [GSState.stepWith, hw, hpref] using hmatch
-            simpa [Matching.matchUnmatched, hm] using hmatch'
-          exact hmen _ _ hmatch'
-      ·
-        have hmatch' : σ.matching.menMatches m' = some w' := by
-          simpa [stepWith_matching_eq_of_reject_none P σ m w hw hpref] using hmatch
-        exact hmen _ _ hmatch'
-  | some mOld =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) (some mOld)
-      · by_cases hm : m' = m
-        · subst hm
-          have hmatch' :
-              (Matching.swapMatch P σ.matching m' mOld w).menMatches m' = some w' := by
-            simpa [GSState.stepWith, hw, hpref] using hmatch
-          by_cases hmOld : mOld = m'
-          ·
-            have hmatch'' := hmatch'
-            simp [Matching.swapMatch, hmOld] at hmatch''
-          · have : w' = w := by
-              have hmOld' : m' ≠ mOld := by
-                simpa [eq_comm] using hmOld
-              simpa [Matching.swapMatch, hmOld', eq_comm] using hmatch'
-            subst this
-            exact hacc
-        · by_cases hmOld : m' = mOld
-          · subst hmOld
-            have hmatch' :
-                (Matching.swapMatch P σ.matching m m' w).menMatches m' = some w' := by
-              simpa [GSState.stepWith, hw, hpref] using hmatch
-            have hmatch'' := hmatch'
-            simp [Matching.swapMatch] at hmatch''
-          · have hmatch' : σ.matching.menMatches m' = some w' := by
-              have hmatch' :
-                  (Matching.swapMatch P σ.matching m mOld w).menMatches m' = some w' := by
-                simpa [GSState.stepWith, hw, hpref] using hmatch
-              simpa [Matching.swapMatch, hm, hmOld] using hmatch'
-            exact hmen _ _ hmatch'
-      ·
-        have hmatch' : σ.matching.menMatches m' = some w' := by
-          simpa [stepWith_matching_eq_of_reject_some P σ m w mOld hw hpref] using hmatch
-        exact hmen _ _ hmatch'
-
--- StepWith preserves women's acceptability.
-lemma womenAcceptable_stepWith
-    (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women)
-    (hwomen : womenAcceptableState P σ) :
-    womenAcceptableState P (GSState.stepWith P σ m w) := by
-  classical
-  intro w' m' hmatch
-  cases hw : σ.matching.womenMatches w with
-  | none =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) none
-      · by_cases hw' : w' = w
-        · subst hw'
-          have hmatch' :
-              (Matching.matchUnmatched P σ.matching m w').womenMatches w' = some m' := by
-            simpa [GSState.stepWith, hw, hpref] using hmatch
-          have : m' = m := by
-            simpa [Matching.matchUnmatched, eq_comm] using hmatch'
-          subst this
-          exact prefersOpt_left_acceptable (p := P.womenPrefs) (a := w') (o1 := m')
-            (o2 := none) hpref
-        ·
-          have hmatch' :
-              (Matching.matchUnmatched P σ.matching m w).womenMatches w' = some m' := by
-            simpa [GSState.stepWith, hw, hpref] using hmatch
-          have hmatch'' : σ.matching.womenMatches w' = some m' := by
-            simpa [Matching.matchUnmatched, hw'] using hmatch'
-          exact hwomen _ _ hmatch''
-      ·
-        have hmatch' : σ.matching.womenMatches w' = some m' := by
-          simpa [stepWith_matching_eq_of_reject_none P σ m w hw hpref] using hmatch
-        exact hwomen _ _ hmatch'
-  | some mOld =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) (some mOld)
-      · by_cases hw' : w' = w
-        · subst hw'
-          have hmatch' :
-              (Matching.swapMatch P σ.matching m mOld w').womenMatches w' = some m' := by
-            simpa [GSState.stepWith, hw, hpref] using hmatch
-          have : m' = m := by
-            simpa [Matching.swapMatch, eq_comm] using hmatch'
-          subst this
-          exact prefersOpt_left_acceptable (p := P.womenPrefs) (a := w') (o1 := m')
-            (o2 := some mOld) hpref
-        ·
-          have hmatch' :
-              (Matching.swapMatch P σ.matching m mOld w).womenMatches w' = some m' := by
-            simpa [GSState.stepWith, hw, hpref] using hmatch
-          have hmatch'' : σ.matching.womenMatches w' = some m' := by
-            simpa [Matching.swapMatch, hw'] using hmatch'
-          exact hwomen _ _ hmatch''
-      ·
-        have hmatch' : σ.matching.womenMatches w' = some m' := by
-          simpa [stepWith_matching_eq_of_reject_some P σ m w mOld hw hpref] using hmatch
-        exact hwomen _ _ hmatch'
-
--- Updating a free pair to match preserves consistency.
-lemma consistent_matchUnmatched
-    (P : Problem) (μ : Matching P) (m : P.Men) (w : P.Women)
-    (hcons : consistent P μ) (hm : μ.menMatches m = none) (hw : μ.womenMatches w = none) :
-    consistent P (Matching.matchUnmatched P μ m w) := by
-  intro m' w'
-  by_cases hm' : m' = m
-  · by_cases hw' : w' = w
-    · simp [Matching.matchUnmatched, hm', hw']
-    · have hw'' : w ≠ w' := by simpa [eq_comm] using hw'
-      have hno : μ.womenMatches w' ≠ some m := by
-        intro hmw
-        have h := (hcons m w').2 hmw
-        simp [hm] at h
-      simp [Matching.matchUnmatched, hm', hw', hw'', hno]
-  · by_cases hw' : w' = w
-    · have hm'' : m ≠ m' := by simpa [eq_comm] using hm'
-      have hno : μ.menMatches m' ≠ some w := by
-        intro hmw
-        have h := (hcons m' w).1 hmw
-        simp [hw] at h
-      simp [Matching.matchUnmatched, hm', hw', hm'', hno]
-    · simpa [Matching.matchUnmatched, hm', hw'] using (hcons m' w')
-
--- Swapping a woman's partner preserves consistency.
-lemma consistent_swapMatch
-    (P : Problem) (μ : Matching P) (m mOld : P.Men) (w : P.Women)
-    (hcons : consistent P μ) (hm : μ.menMatches m = none)
-    (hw : μ.womenMatches w = some mOld) :
-    consistent P (Matching.swapMatch P μ m mOld w) := by
-  have hmne : m ≠ mOld := by
-    intro hmeq
-    subst hmeq
-    have h := (hcons m w).2 hw
-    simp [hm] at h
-  have hOld : μ.menMatches mOld = some w := (hcons mOld w).2 hw
-  intro m' w'
-  by_cases hm' : m' = m
-  · by_cases hw' : w' = w
-    · simp [Matching.swapMatch, hm', hw', hmne]
-    · have hw'' : w ≠ w' := by simpa [eq_comm] using hw'
-      have hno : μ.womenMatches w' ≠ some m := by
-        intro hmw
-        have h := (hcons m w').2 hmw
-        simp [hm] at h
-      simp [Matching.swapMatch, hm', hw', hw'', hno, hmne]
-  · by_cases hOldm : m' = mOld
-    · by_cases hw' : w' = w
-      · simp [Matching.swapMatch, hOldm, hw', hmne]
-      · have hw'' : w ≠ w' := by simpa [eq_comm] using hw'
-        have hno : μ.womenMatches w' ≠ some mOld := by
-          intro hmw
-          have h1 : μ.menMatches mOld = some w' := (hcons mOld w').2 hmw
-          have h2 : μ.menMatches mOld = some w := hOld
-          have hEq : some w' = some w := by simpa [h1] using h2
-          cases hEq
-          exact hw'' rfl
-        simp [Matching.swapMatch, hOldm, hw', hno]
-    · by_cases hw' : w' = w
-      · have hm'' : m ≠ m' := by simpa [eq_comm] using hm'
-        have hno : μ.menMatches m' ≠ some w := by
-          intro hmw
-          have := (hcons m' w).1 hmw
-          have : mOld = m' := by simpa [hw] using this
-          exact hOldm this.symm
-        simp [Matching.swapMatch, hm', hOldm, hw', hm'', hno]
-      · simpa [Matching.swapMatch, hm', hOldm, hw'] using (hcons m' w')
-
--- A concrete proposal step preserves consistency.
-lemma stepWith_consistent
-    (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women)
-    (hcons : consistent P σ.matching) (hm : σ.matching.menMatches m = none) :
-    consistent P (GSState.stepWith P σ m w).matching := by
-  classical
-  cases hw : σ.matching.womenMatches w with
-  | none =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) none
-      · simp [GSState.stepWith, hw, hpref, consistent_matchUnmatched, hcons, hm]
-      ·
-        have hEq := stepWith_matching_eq_of_reject_none P σ m w hw hpref
-        simpa [hEq] using hcons
-  | some mOld =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) (some mOld)
-      · simp [GSState.stepWith, hw, hpref, consistent_swapMatch, hcons, hm]
-      ·
-        have hEq := stepWith_matching_eq_of_reject_some P σ m w mOld hw hpref
-        simpa [hEq] using hcons
-
--- A generic step preserves consistency.
-lemma step_consistent
-    (P : Problem) (σ : GSState P) (hcons : consistent P σ.matching) :
-    consistent P (GSState.step P σ).matching := by
-  classical
-  by_cases hfree : ∃ m, isFree P σ m
-  · classical
-    let m := Classical.choose hfree
-    have hm : isFree P σ m := Classical.choose_spec hfree
-    let w := _root_.StableMarriageLean.chooseMaxCandidate P σ m hm.2
-    simpa [GSState.step, hfree, m, w] using
-      (stepWith_consistent P σ m w hcons hm.1)
-  · simpa [GSState.step, hfree] using hcons
-
--- A generic step preserves men's acceptability.
-lemma step_menAcceptable
-    (P : Problem) (σ : GSState P) (hmen : menAcceptableState P σ) :
-    menAcceptableState P (GSState.step P σ) := by
-  classical
-  by_cases hfree : ∃ m, isFree P σ m
-  · classical
-    let m := Classical.choose hfree
-    have hm : isFree P σ m := Classical.choose_spec hfree
-    let w := _root_.StableMarriageLean.chooseMaxCandidate P σ m hm.2
-    have hwmem : w ∈ candidateWomen P σ m :=
-      _root_.StableMarriageLean.chooseMaxCandidate_mem P σ m hm.2
-    have hacc : P.menPrefs.acceptable m w := by
-      have hmem : P.menPrefs.acceptable m w ∧ ¬ σ.proposed m w := by
-        simpa [candidateWomen] using hwmem
-      exact hmem.1
-    simpa [GSState.step, hfree, m, w] using
-      (menAcceptable_stepWith P σ m w hacc hmen)
-  · simpa [GSState.step, hfree] using hmen
-
--- A generic step preserves women's acceptability.
-lemma step_womenAcceptable
-    (P : Problem) (σ : GSState P) (hwomen : womenAcceptableState P σ) :
-    womenAcceptableState P (GSState.step P σ) := by
-  classical
-  by_cases hfree : ∃ m, isFree P σ m
-  · classical
-    let m := Classical.choose hfree
-    have hm : isFree P σ m := Classical.choose_spec hfree
-    let w := _root_.StableMarriageLean.chooseMaxCandidate P σ m hm.2
-    simpa [GSState.step, hfree, m, w] using
-      (womenAcceptable_stepWith P σ m w hwomen)
-  · simpa [GSState.step, hfree] using hwomen
-
--- The initial matching is consistent.
-lemma initial_consistent (P : Problem) : consistent P (GSState.initial P).matching := by
-  intro m w
-  simp [GSState.initial]
-
--- All iterated steps preserve consistency.
-lemma runSteps_consistent (P : Problem) (n : Nat) :
-    consistent P (GSState.runSteps P n).matching := by
-  induction n with
-  | zero =>
-      simpa using initial_consistent P
-  | succ n ih =>
-      simpa [GSState.runSteps] using step_consistent P _ ih
-
--- All iterated steps preserve men's acceptability.
-lemma runSteps_menAcceptable (P : Problem) (n : Nat) :
-    menAcceptableState P (GSState.runSteps P n) := by
-  induction n with
-  | zero =>
-      simpa using initial_menAcceptable P
-  | succ n ih =>
-      simpa [GSState.runSteps] using step_menAcceptable P _ ih
-
--- All iterated steps preserve women's acceptability.
-lemma runSteps_womenAcceptable (P : Problem) (n : Nat) :
-    womenAcceptableState P (GSState.runSteps P n) := by
-  induction n with
-  | zero =>
-      simpa using initial_womenAcceptable P
-  | succ n ih =>
-      simpa [GSState.runSteps] using step_womenAcceptable P _ ih
-
--- Proposed pairs are downward-closed under men's preferences.
-def menProposedDownwardState (P : Problem) (σ : GSState P) : Prop :=
-  ∀ m w w', σ.proposed m w → P.menPrefs.prefers m w' w → σ.proposed m w'
-
--- The initial state is downward-closed (no proposals).
-lemma initial_menProposedDownward (P : Problem) :
-    menProposedDownwardState P (GSState.initial P) := by
-  intro m w w' hprop
-  simp [GSState.initial] at hprop
-
--- A generic step preserves downward-closure of proposals.
-lemma step_menProposedDownward
-    (P : Problem) (σ : GSState P) (hdown : menProposedDownwardState P σ) :
-    menProposedDownwardState P (GSState.step P σ) := by
-  classical
-  -- Split on whether there is a free man who can still propose.
-  by_cases hfree : ∃ m, isFree P σ m
-  · classical
-    let m := Classical.choose hfree
-    have hm : isFree P σ m := Classical.choose_spec hfree
-    let w := chooseMaxCandidate P σ m hm.2
-    intro m' w' w'' hprop hpref
-    have hprop' :
-        σ.proposed m' w' ∨ (m' = m ∧ w' = w) := by
-      simpa [GSState.step, hfree, m, w, stepWith_proposed] using hprop
-    cases hprop' with
-    | inl hpropOld =>
-        have hpropOld' := hdown _ _ _ hpropOld hpref
-        simp [GSState.step, hfree, stepWith_proposed, hpropOld']
-    | inr hnew =>
-        rcases hnew with ⟨hm', hw'⟩
-        subst hm'
-        subst hw'
-        have hpropOld' : σ.proposed m w'' := by
-          by_contra hnot
-          have hacc : P.menPrefs.acceptable m w'' :=
-            P.menPrefs.prefers_acceptable_left m _ _ hpref
-          have hmem : w'' ∈ candidateWomen P σ m := by
-            simp [candidateWomen, hacc, hnot]
-          exact (chooseMaxCandidate_no_better P σ m hm.2 _ hmem hpref)
-        simp [GSState.step, hfree, stepWith_proposed, hpropOld']
+lemma prefersOpt_irrefl_for_explicit (p : Preferences Agent Partner)
+  (a : Agent) (o : Partner) : ¬ prefersOpt p a (some o) (some o) := by
+  unfold prefersOpt
+  simp
+  intro h
+  split_ands
   ·
-    simpa [GSState.step, hfree] using hdown
+    exact h
+  ·
+    exact p.prefers_irrefl a o
 
--- Running steps preserves downward-closure of proposals.
-lemma runSteps_menProposedDownward (P : Problem) (n : Nat) :
-    menProposedDownwardState P (GSState.runSteps P n) := by
-  induction n with
-  | zero =>
-      simpa [GSState.runSteps] using initial_menProposedDownward P
-  | succ n ih =>
-      simpa [GSState.runSteps] using step_menProposedDownward P _ ih
+lemma prefersOpt_trans (p : Preferences Agent Partner)
+  (a : Agent) (o1 o2 o3 : Option Partner) :
+  prefersOpt p a o1 o2 ∧ prefersOpt p a o2 o3 → prefersOpt p a o1 o3 := by
+  unfold prefersOpt
+  intro ⟨h1, h2⟩
+  cases o1 <;> cases o2 <;> cases o3 <;> simp at h1 h2 <;> simp_all
+  rename_i x1 x2 x3
+  intro x3_acceptable
+  have x1_over_x2 := h1.right
+  have x2_over_x3 := h2.right x3_acceptable
+  exact p.prefers_trans a x1 x2 x3 x1_over_x2 x2_over_x3
 
--- Every matched man has already proposed to his match.
-def menMatchedProposedState (P : Problem) (σ : GSState P) : Prop :=
-  ∀ m w, σ.matching.menMatches m = some w → σ.proposed m w
+lemma chooseMaxCandidate_is_best (σ : GSState P) (m : P.Men)
+  (h : (candidateWomen P σ m).Nonempty) :
+  woman_is_better_than_all_candidates σ m (chooseMaxCandidate P σ m h) := by
+  set w := chooseMaxCandidate P σ m h with w_eq
+  have w_acceptable : P.menPrefs.acceptable m w := by
+    exact chooseMaxCandidate_is_acceptable σ m h
+  unfold woman_is_better_than_all_candidates
+  intro w' h_w'_candidate w'_neq_w
+  unfold prefersOpt
+  simp
+  split_ands
+  · -- prove acceptable
+    exact chooseMaxCandidate_is_acceptable σ m h
+  · -- prove better
+    intro w'_acceptable
+    have not_prefers := chooseMaxCandidate_no_better P σ m h w' h_w'_candidate
+    rw [← w_eq] at not_prefers
+    have total := P.menPrefs.prefers_total m w w' w_acceptable w'_acceptable
+    grind
 
--- The initial state has no matched pairs.
-lemma initial_menMatchedProposed (P : Problem) :
-    menMatchedProposedState P (GSState.initial P) := by
-  intro m w hmatch
-  simp [GSState.initial] at hmatch
+lemma matching_match_unmatched_doesnt_modify_anything_else_men (P : Problem) (μ : Matching P) (m : P.Men)
+(m' : P.Men) (h_neq : m' ≠ m): ∀ w : P.Women, (μ.matchUnmatched P m w).menMatches m' = μ.menMatches m' := by
+  intro w
+  unfold Matching.matchUnmatched
+  simp
+  grind
 
--- StepWith preserves the property that matches are proposed.
-lemma stepWith_menMatchedProposed
-    (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women)
-    (hprop : menMatchedProposedState P σ) :
-    menMatchedProposedState P (GSState.stepWith P σ m w) := by
-  classical
-  intro m' w' hmatch
-  -- Track whether the recipient woman is currently matched.
-  cases hw : σ.matching.womenMatches w with
-  | none =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) none
-      · by_cases hm : m' = m
-        · cases hm
-          have hmatch' :
-              (Matching.matchUnmatched P σ.matching m w).menMatches m = some w' := by
-            simpa [GSState.stepWith, hw, hpref] using hmatch
-          have : w' = w := by
-            simpa [Matching.matchUnmatched, eq_comm] using hmatch'
-          subst this
-          simp [stepWith_proposed]
-        · have hmatch' : σ.matching.menMatches m' = some w' := by
-            have hmatch' :
-                (Matching.matchUnmatched P σ.matching m w).menMatches m' = some w' := by
-              simpa [GSState.stepWith, hw, hpref] using hmatch
-            simpa [Matching.matchUnmatched, hm] using hmatch'
-          have hprop' := hprop _ _ hmatch'
-          simp [stepWith_proposed, hprop']
-      ·
-        have hmatch' : σ.matching.menMatches m' = some w' := by
-          simpa [stepWith_matching_eq_of_reject_none P σ m w hw hpref] using hmatch
-        have hprop' := hprop _ _ hmatch'
-        simp [stepWith_proposed, hprop']
-  | some mOld =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) (some mOld)
-      · by_cases hm : m' = m
-        · cases hm
-          have hmatch' :
-              (Matching.swapMatch P σ.matching m mOld w).menMatches m = some w' := by
-            simpa [GSState.stepWith, hw, hpref] using hmatch
-          by_cases hmOld : mOld = m
-          · cases hmOld
-            have : (none : Option P.Women) = some w' := by
-              have hmatch'' := hmatch'
-              simp [Matching.swapMatch] at hmatch''
-            cases this
-          · have : w' = w := by
-              have hmOld' : m ≠ mOld := by
-                simpa [eq_comm] using hmOld
-              simpa [Matching.swapMatch, hmOld', eq_comm] using hmatch'
-            subst this
-            simp [stepWith_proposed]
-        · by_cases hmOld : m' = mOld
-          · subst hmOld
-            have : (none : Option P.Women) = some w' := by
-              have hmatch' :
-                  (Matching.swapMatch P σ.matching m m' w).menMatches m' = some w' := by
-                simpa [GSState.stepWith, hw, hpref] using hmatch
-              have hmatch'' := hmatch'
-              simp [Matching.swapMatch] at hmatch''
-            cases this
-          · have hmatch' : σ.matching.menMatches m' = some w' := by
-              have hmatch' :
-                  (Matching.swapMatch P σ.matching m mOld w).menMatches m' = some w' := by
-                simpa [GSState.stepWith, hw, hpref] using hmatch
-              simpa [Matching.swapMatch, hm, hmOld] using hmatch'
-            have hprop' := hprop _ _ hmatch'
-            simp [stepWith_proposed, hprop']
-      ·
-        have hmatch' : σ.matching.menMatches m' = some w' := by
-          simpa [stepWith_matching_eq_of_reject_some P σ m w mOld hw hpref] using hmatch
-        have hprop' := hprop _ _ hmatch'
-        simp [stepWith_proposed, hprop']
+lemma matching_match_unmatched_doesnt_modify_anything_else_women (P : Problem) (μ : Matching P) (w : P.Women)
+(w' : P.Women) (h_neq : w' ≠ w): ∀ m : P.Men, (μ.matchUnmatched P m w).womenMatches w' = μ.womenMatches w' := by
+  intro m
+  unfold Matching.matchUnmatched
+  simp
+  grind
 
--- A generic step preserves the property that matches are proposed.
-lemma step_menMatchedProposed
-    (P : Problem) (σ : GSState P) (hprop : menMatchedProposedState P σ) :
-    menMatchedProposedState P (GSState.step P σ) := by
-  classical
-  by_cases hfree : ∃ m, isFree P σ m
-  · classical
+-- consistency
+lemma galeShapley_initial_consistent (P : Problem) : consistent P (GSState.initial P).matching := by
+  unfold GSState.initial consistent
+  simp
+lemma galeShapley_stepWith_preserves_consistency (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women)
+(h_mfree : isFree P σ m) (h_consistent : consistent P σ.matching)
+: consistent P (GSState.stepWith P σ m w).matching := by
+  unfold consistent at h_consistent ⊢
+  unfold isFree at h_mfree
+  unfold GSState.stepWith
+  simp
+  split <;> split <;> simp
+  unfold Matching.matchUnmatched
+  simp
+  grind
+  grind
+  unfold Matching.swapMatch
+  simp
+  intro m' w'
+  by_cases w'_eq_w : w' = w
+  case pos =>
+    grind
+  case neg =>
+    simp [w'_eq_w]
+    rename_i w_old_match is_old_match prefers_m
+    constructor
+    case mp =>
+      intro h
+      grind
+    case mpr =>
+      intro h
+      have m'_matched_to_w' : σ.matching.menMatches m' = (some w') := by
+        grind
+      have m'_neq_m : m' ≠ m := by
+        grind
+      have w_old_match_matched_to_w' : σ.matching.menMatches w_old_match = (some w) := by
+        grind
+      have m'_neq_w_old_match : m' ≠ w_old_match := by
+        grind
+      grind
+  grind
+lemma galeShapley_step_preserves_consistency (P: Problem) (σ : GSState P) (h_consistent : consistent P σ.matching)
+: consistent P (GSState.step P σ).matching := by
+  unfold GSState.step
+  split
+  case isTrue hfree =>
     let m := Classical.choose hfree
     have hm : isFree P σ m := Classical.choose_spec hfree
     let w := chooseMaxCandidate P σ m hm.2
-    simpa [GSState.step, hfree, m, w] using
-      (stepWith_menMatchedProposed P σ m w hprop)
-  · simpa [GSState.step, hfree] using hprop
-
--- Running steps preserves the property that matches are proposed.
-lemma runSteps_menMatchedProposed (P : Problem) (n : Nat) :
-    menMatchedProposedState P (GSState.runSteps P n) := by
+    show consistent P (GSState.stepWith P σ m w).matching
+    exact galeShapley_stepWith_preserves_consistency P σ m w hm h_consistent
+  case isFalse =>
+    exact h_consistent
+lemma galeShapley_n_steps_preserves_consistency (P : Problem) (n : Nat) : consistent P (GSState.runSteps P n).matching := by
   induction n with
   | zero =>
-      simpa [GSState.runSteps] using initial_menMatchedProposed P
+    unfold GSState.runSteps
+    exact galeShapley_initial_consistent P
   | succ n ih =>
-      simpa [GSState.runSteps] using step_menMatchedProposed P _ ih
+    unfold GSState.runSteps
+    exact galeShapley_step_preserves_consistency P (GSState.runSteps P n) ih
 
--- If a woman is unmatched, then any man who has proposed to her is unacceptable.
-def womenUnmatchedRejectState (P : Problem) (σ : GSState P) : Prop :=
-  ∀ w m, σ.matching.womenMatches w = none → σ.proposed m w → ¬ P.womenPrefs.acceptable w m
 
--- The initial state has no acceptable proposers for unmatched women.
-lemma initial_womenUnmatchedReject (P : Problem) : womenUnmatchedRejectState P (GSState.initial P) := by
-  intro w m hmatch hprop
-  simp [GSState.initial] at hprop
+-- individual rationality
+lemma galeShapley_initial_individually_rational (P : Problem) : individuallyRational P (GSState.initial P).matching := by
+  unfold individuallyRational GSState.initial
+  simp
 
--- StepWith preserves the unmatched-rejection property.
-lemma stepWith_womenUnmatchedReject
-    (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women)
-    (hrej : womenUnmatchedRejectState P σ) :
-    womenUnmatchedRejectState P (GSState.stepWith P σ m w) := by
-  classical
-  intro w' m' hmatch hprop
-  -- Track the current match status of the recipient woman.
-  cases hw : σ.matching.womenMatches w with
-  | none =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) none
-      · by_cases hw' : w' = w
-        · cases hw'
-          have : (GSState.stepWith P σ m w).matching.womenMatches w ≠ none := by
-            simp [GSState.stepWith, hw, hpref, Matching.matchUnmatched]
-          exact (this hmatch).elim
-        ·
-          have hmatch' : σ.matching.womenMatches w' = none := by
-            simpa [GSState.stepWith, hw, hpref, Matching.matchUnmatched, hw'] using hmatch
-          have hprop' : σ.proposed m' w' := by
-            simpa [stepWith_proposed, hw'] using hprop
-          exact hrej _ _ hmatch' hprop'
-      · by_cases hw' : w' = w
-        · cases hw'
-          have hacc : ¬ P.womenPrefs.acceptable w m := by
-            simpa [prefersOpt] using hpref
-          have hprop' :
-              σ.proposed m' w ∨ (m' = m ∧ w = w) := by
-            simpa [stepWith_proposed] using hprop
-          cases hprop' with
-          | inl hpropOld =>
-              exact hrej _ _ hw hpropOld
-          | inr hnew =>
-              rcases hnew with ⟨hm', _⟩
-              cases hm'
-              exact hacc
-        ·
-          have hmatch' : σ.matching.womenMatches w' = none := by
-            simpa [GSState.stepWith, hw, hpref, Matching.matchUnmatched, hw'] using hmatch
-          have hprop' : σ.proposed m' w' := by
-            simpa [stepWith_proposed, hw'] using hprop
-          exact hrej _ _ hmatch' hprop'
-  | some mOld =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) (some mOld)
-      · by_cases hw' : w' = w
-        · cases hw'
-          have : (GSState.stepWith P σ m w).matching.womenMatches w ≠ none := by
-            simp [GSState.stepWith, hw, hpref, Matching.swapMatch]
-          exact (this hmatch).elim
-        ·
-          have hmatch' : σ.matching.womenMatches w' = none := by
-            simpa [GSState.stepWith, hw, hpref, Matching.swapMatch, hw'] using hmatch
-          have hprop' : σ.proposed m' w' := by
-            simpa [stepWith_proposed, hw'] using hprop
-          exact hrej _ _ hmatch' hprop'
-      · by_cases hw' : w' = w
-        · cases hw'
-          have : (GSState.stepWith P σ m w).matching.womenMatches w ≠ none := by
-            simp [GSState.stepWith, hw, hpref]
-          exact (this hmatch).elim
-        ·
-          have hmatch' : σ.matching.womenMatches w' = none := by
-            simpa [GSState.stepWith, hw, hpref, Matching.swapMatch, hw'] using hmatch
-          have hprop' : σ.proposed m' w' := by
-            simpa [stepWith_proposed, hw'] using hprop
-          exact hrej _ _ hmatch' hprop'
+lemma galeShapley_stepWith_preserves_individual_rationality (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women)
+(h_rational : individuallyRational P σ.matching) (h_acceptable : P.menPrefs.acceptable m w):
+  individuallyRational P (GSState.stepWith P σ m w).matching := by
+  unfold individuallyRational
+  unfold individuallyRational at h_rational
+  unfold GSState.stepWith
+  split <;> split <;> simp
+  unfold Matching.matchUnmatched
+  simp
+  rename_i prefers_m old_match_none
+  unfold prefersOpt at old_match_none
+  simp at old_match_none
+  grind
+  grind
+  rename_i old_match old_match_some prefers_m
+  unfold Matching.swapMatch
+  simp
+  unfold prefersOpt at prefers_m
+  simp at prefers_m
+  grind
+  grind
 
--- A generic step preserves unmatched-rejection.
-lemma step_womenUnmatchedReject
-    (P : Problem) (σ : GSState P) (hrej : womenUnmatchedRejectState P σ) :
-    womenUnmatchedRejectState P (GSState.step P σ) := by
-  classical
-  by_cases hfree : ∃ m, isFree P σ m
-  · classical
+lemma galeShapley_step_preserves_individual_rationality (P : Problem) (σ : GSState P) (h_rational : individuallyRational P σ.matching)
+: individuallyRational P (GSState.step P σ).matching := by
+  unfold GSState.step
+  simp
+  split_ifs
+  case pos hfree =>
     let m := Classical.choose hfree
     have hm : isFree P σ m := Classical.choose_spec hfree
     let w := chooseMaxCandidate P σ m hm.2
-    simpa [GSState.step, hfree, m, w] using
-      (stepWith_womenUnmatchedReject P σ m w hrej)
-  · simpa [GSState.step, hfree] using hrej
+    show individuallyRational P (GSState.stepWith P σ m w).matching
+    have w_acceptable := chooseMaxCandidate_is_acceptable σ m hm.2
+    exact galeShapley_stepWith_preserves_individual_rationality P σ m w h_rational w_acceptable
+  case neg =>
+    exact h_rational
 
--- Running steps preserves unmatched-rejection.
-lemma runSteps_womenUnmatchedReject (P : Problem) (n : Nat) :
-    womenUnmatchedRejectState P (GSState.runSteps P n) := by
+lemma galeShaley_n_steps_preserves_individual_rationality (P : Problem) (n : Nat)
+: individuallyRational P (GSState.runSteps P n).matching := by
   induction n with
   | zero =>
-      simpa [GSState.runSteps] using initial_womenUnmatchedReject P
+    unfold GSState.runSteps
+    exact galeShapley_initial_individually_rational P
   | succ n ih =>
-      simpa [GSState.runSteps] using step_womenUnmatchedReject P _ ih
+    unfold GSState.runSteps
+    exact galeShapley_step_preserves_individual_rationality P (GSState.runSteps P n) ih
 
--- A woman's current match is at least as preferred as any proposer.
-def womenBestState (P : Problem) (σ : GSState P) : Prop :=
-  ∀ w m m',
-    σ.matching.womenMatches w = some m →
-    σ.proposed m' w →
-    m' ≠ m →
-    prefersOpt P.womenPrefs w (some m) (some m')
-
--- The initial state satisfies the women's best-match property.
-lemma initial_womenBest (P : Problem) : womenBestState P (GSState.initial P) := by
-  intro w m m' hmatch
-  simp [GSState.initial] at hmatch
-
--- StepWith preserves the women's best-match property.
-lemma stepWith_womenBest
-    (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women)
-    (hwomen : womenAcceptableState P σ)
-    (hrej : womenUnmatchedRejectState P σ)
-    (hbest : womenBestState P σ) :
-    womenBestState P (GSState.stepWith P σ m w) := by
-  classical
-  intro w' m' m'' hmatch hprop hne
-  -- Split on whether the recipient woman is currently matched.
-  cases hw : σ.matching.womenMatches w with
-  | none =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) none
-      · by_cases hw' : w' = w
-        · cases hw'
-          have hmatch' :
-              (Matching.matchUnmatched P σ.matching m w).womenMatches w = some m' := by
-            simpa [GSState.stepWith, hw, hpref] using hmatch
-          have hm' : m' = m := by
-            simpa [Matching.matchUnmatched, eq_comm] using hmatch'
-          cases hm'
-          have hprop' :
-              σ.proposed m'' w ∨ (m'' = m ∧ w = w) := by
-            simpa [stepWith_proposed] using hprop
-          cases hprop' with
-          | inl hpropOld =>
-              have haccm : P.womenPrefs.acceptable w m := by
-                exact prefersOpt_left_acceptable (p := P.womenPrefs) (a := w) (o1 := m) (o2 := none) hpref
-              have hacc'' : ¬ P.womenPrefs.acceptable w m'' := by
-                exact hrej _ _ hw hpropOld
-              simp [prefersOpt, haccm, hacc'']
-          | inr hnew =>
-              rcases hnew with ⟨hm'', _⟩
-              cases hm''
-              exact (hne rfl).elim
-        ·
-          have hmatch' : σ.matching.womenMatches w' = some m' := by
-            have hmatch' :
-                (Matching.matchUnmatched P σ.matching m w).womenMatches w' = some m' := by
-              simpa [GSState.stepWith, hw, hpref] using hmatch
-            simpa [Matching.matchUnmatched, hw'] using hmatch'
-          have hprop' : σ.proposed m'' w' := by
-            simpa [stepWith_proposed, hw'] using hprop
-          exact hbest _ _ _ hmatch' hprop' hne
-      ·
-        by_cases hw' : w' = w
-        · cases hw'
-          have hmatch' : σ.matching.womenMatches w = some m' := by
-            simpa [stepWith_matching_eq_of_reject_none P σ m w hw hpref] using hmatch
-          simp [hw] at hmatch'
-        ·
-          have hmatch' : σ.matching.womenMatches w' = some m' := by
-            simpa [stepWith_matching_eq_of_reject_none P σ m w hw hpref] using hmatch
-          have hprop' : σ.proposed m'' w' := by
-            simpa [stepWith_proposed, hw'] using hprop
-          exact hbest _ _ _ hmatch' hprop' hne
-  | some mOld =>
-      by_cases hpref : prefersOpt P.womenPrefs w (some m) (some mOld)
-      · by_cases hw' : w' = w
-        · cases hw'
-          have hmatch' :
-              (Matching.swapMatch P σ.matching m mOld w).womenMatches w = some m' := by
-            simpa [GSState.stepWith, hw, hpref] using hmatch
-          have hm' : m' = m := by
-            simpa [Matching.swapMatch, eq_comm] using hmatch'
-          cases hm'
-          have hprop' :
-              σ.proposed m'' w ∨ (m'' = m ∧ w = w) := by
-            simpa [stepWith_proposed] using hprop
-          cases hprop' with
-          | inl hpropOld =>
-              by_cases hEq : m'' = mOld
-              · subst hEq
-                simpa using hpref
-              · by_cases hacc'' : P.womenPrefs.acceptable w m''
-                · have haccm : P.womenPrefs.acceptable w m := by
-                    exact prefersOpt_left_acceptable (p := P.womenPrefs) (a := w) (o1 := m) (o2 := some mOld) hpref
-                  have haccOld : P.womenPrefs.acceptable w mOld := by
-                    exact hwomen _ _ hw
-                  have hpref' : P.womenPrefs.prefers w m mOld := by
-                    simpa [prefersOpt, haccm, haccOld] using hpref
-                  have hbestOld : P.womenPrefs.prefers w mOld m'' := by
-                    have := hbest _ _ _ hw hpropOld hEq
-                    simpa [prefersOpt, haccOld, hacc''] using this
-                  have htrans := P.womenPrefs.prefers_trans w m mOld m'' hpref' hbestOld
-                  simpa [prefersOpt, haccm, hacc''] using htrans
-                ·
-                  have haccm : P.womenPrefs.acceptable w m := by
-                    exact prefersOpt_left_acceptable (p := P.womenPrefs) (a := w) (o1 := m) (o2 := some mOld) hpref
-                  simp [prefersOpt, haccm, hacc'']
-          | inr hnew =>
-              rcases hnew with ⟨hm'', _⟩
-              cases hm''
-              exact (hne rfl).elim
-        ·
-          have hmatch' : σ.matching.womenMatches w' = some m' := by
-            have hmatch' :
-                (Matching.swapMatch P σ.matching m mOld w).womenMatches w' = some m' := by
-              simpa [GSState.stepWith, hw, hpref] using hmatch
-            simpa [Matching.swapMatch, hw'] using hmatch'
-          have hprop' : σ.proposed m'' w' := by
-            simpa [stepWith_proposed, hw'] using hprop
-          exact hbest _ _ _ hmatch' hprop' hne
-      ·
-        by_cases hw' : w' = w
-        · cases hw'
-          have hmatch' : σ.matching.womenMatches w = some m' := by
-            simpa [stepWith_matching_eq_of_reject_some P σ m w mOld hw hpref] using hmatch
-          have hm' : mOld = m' := by
-            simpa [hw] using hmatch'
-          cases hm'
-          have hprop' :
-              σ.proposed m'' w ∨ (m'' = m ∧ w = w) := by
-            simpa [stepWith_proposed] using hprop
-          cases hprop' with
-          | inl hpropOld =>
-              exact hbest _ _ _ hw hpropOld hne
-          | inr hnew =>
-              rcases hnew with ⟨hm'', _⟩
-              cases hm''
-              have haccOld : P.womenPrefs.acceptable w m' := hwomen _ _ hw
-              by_cases haccm : P.womenPrefs.acceptable w m
-              · have hneq : m' ≠ m := by
-                  intro hEq
-                  subst hEq
-                  exact hne rfl
-                have htot :=
-                  P.womenPrefs.prefers_total w m' m haccOld haccm hneq
-                cases htot with
-                | inl hprefOld =>
-                    simpa [prefersOpt, haccOld, haccm] using hprefOld
-                | inr hprefNew =>
-                    have : prefersOpt P.womenPrefs w (some m) (some m') := by
-                      simpa [prefersOpt, haccm, haccOld] using hprefNew
-                    exact (hpref this).elim
-              ·
-                simp [prefersOpt, haccOld, haccm]
-        ·
-          have hmatch' : σ.matching.womenMatches w' = some m' := by
-            simpa [stepWith_matching_eq_of_reject_some P σ m w mOld hw hpref] using hmatch
-          have hprop' : σ.proposed m'' w' := by
-            simpa [stepWith_proposed, hw'] using hprop
-          exact hbest _ _ _ hmatch' hprop' hne
-
--- A generic step preserves the women's best-match property.
-lemma step_womenBest
-    (P : Problem) (σ : GSState P)
-    (hwomen : womenAcceptableState P σ)
-    (hrej : womenUnmatchedRejectState P σ)
-    (hbest : womenBestState P σ) :
-    womenBestState P (GSState.step P σ) := by
-  classical
-  by_cases hfree : ∃ m, isFree P σ m
-  · classical
-    let m := Classical.choose hfree
-    have hm : isFree P σ m := Classical.choose_spec hfree
-    let w := chooseMaxCandidate P σ m hm.2
-    simpa [GSState.step, hfree, m, w] using
-      (stepWith_womenBest P σ m w hwomen hrej hbest)
-  · simpa [GSState.step, hfree] using hbest
-
--- Running steps preserves the women's best-match property.
-lemma runSteps_womenBest (P : Problem) (n : Nat) :
-    womenBestState P (GSState.runSteps P n) := by
-  induction n with
-  | zero =>
-      simpa [GSState.runSteps] using initial_womenBest P
-  | succ n ih =>
-      have hwomen := runSteps_womenAcceptable P n
-      have hrej := runSteps_womenUnmatchedReject P n
-      simpa [GSState.runSteps] using step_womenBest P _ hwomen hrej ih
-
--- If a free man exists, the next step adds a new proposal.
-lemma proposedCount_step_of_free
-    (P : Problem) (σ : GSState P) (hfree : ∃ m, isFree P σ m) :
-    proposedCount P (GSState.step P σ) = proposedCount P σ + 1 := by
-  classical
-  let m := Classical.choose hfree
-  have hm : isFree P σ m := Classical.choose_spec hfree
-  let w := _root_.StableMarriageLean.chooseMaxCandidate P σ m hm.2
-  have hwmem : w ∈ candidateWomen P σ m :=
-    _root_.StableMarriageLean.chooseMaxCandidate_mem P σ m hm.2
-  have hnew : ¬ σ.proposed m w := by
-    have hmem : P.menPrefs.acceptable m w ∧ ¬ σ.proposed m w := by
-      simpa [candidateWomen] using hwmem
-    exact hmem.2
-  simpa [GSState.step, hfree, m, w] using
-    (proposedCount_stepWith P σ m w hnew)
-
--- If a free man exists, not all pairs have been proposed.
-lemma proposedCount_lt_bound_of_free
-    (P : Problem) (σ : GSState P) (hfree : ∃ m, isFree P σ m) :
-    proposedCount P σ < proposalBound P := by
-  classical
+-- termination
+-- general idea: termination means there are no free men
+-- "clearly", sum of proposals length is bounded by n * m (proposalBound)
+-- somewhat less clearly, if sum of proposals length is n * m, then each proposal list is full so no man is free
+-- there is a free man iff GSState.step calls GSState.stepWith which will always increase the sum of proposal lengths by 1
+-- by induction we can prove that GSState.runSteps K is either terminated or sum of proposal lengths is K
+def proposal_length (σ : GSState P) (m : P.Men) := (σ.men_proposals m).card
+def proposal_count (σ : GSState P) : Nat := Finset.sum (P.menFintype.elems) (proposal_length σ)
+def m_card (P : Problem) : Nat :=
   letI := P.menFintype
+  Fintype.card P.Men
+def w_card (P : Problem) : Nat :=
   letI := P.womenFintype
-  letI : Fintype (P.Men × P.Women) := inferInstance
-  let m := Classical.choose hfree
-  have hm : isFree P σ m := Classical.choose_spec hfree
-  let w := _root_.StableMarriageLean.chooseMaxCandidate P σ m hm.2
-  have hwmem : w ∈ candidateWomen P σ m :=
-    _root_.StableMarriageLean.chooseMaxCandidate_mem P σ m hm.2
-  have hnew : ¬ σ.proposed m w := by
-    have hmem : P.menPrefs.acceptable m w ∧ ¬ σ.proposed m w := by
-      simpa [candidateWomen] using hwmem
-    exact hmem.2
-  have hnotmem : (m, w) ∉ proposedSet P σ := by
-    simp [proposedSet, hnew]
-  have hssub : proposedSet P σ ⊂ (Finset.univ : Finset (P.Men × P.Women)) := by
-    have hsubset :
-        proposedSet P σ ⊆ (Finset.univ : Finset (P.Men × P.Women)) := by
-      intro x hx
-      simp
-    refine (Finset.ssubset_iff_of_subset hsubset).2 ?_
-    refine ⟨(m, w), ?_, hnotmem⟩
+  Fintype.card P.Women
+lemma man_proposals_le_num_of_women (σ : GSState P) (m : P.Men) :
+  proposal_length σ m ≤ (w_card P) := by
+    letI := P.womenFintype
+    unfold proposal_length
+    exact Finset.card_le_univ (σ.men_proposals m)
+lemma proposal_count_le_proposalBound (σ : GSState P) : proposal_count σ ≤ proposalBound P := by
+  unfold proposalBound proposal_count
+  have function_ver : ∀ m ∈ P.menFintype.elems, proposal_length σ m ≤ ((fun _ => w_card P) m) := by
     simp
-  have hcard :
-      (proposedSet P σ).card <
-        (Finset.univ : Finset (P.Men × P.Women)).card :=
-    Finset.card_lt_card hssub
-  simpa [proposedCount, proposalBound, Fintype.card_prod] using hcard
-
--- If a state is terminated, stepping does nothing.
-lemma step_eq_of_terminated
-    (P : Problem) (σ : GSState P) (h : terminated P σ) :
-    GSState.step P σ = σ := by
-  classical
-  have hfree : ¬ ∃ m, isFree P σ m := by
-    simpa [terminated] using h
-  by_cases hfree' : ∃ m, isFree P σ m
-  · exact (False.elim (hfree hfree'))
-  · simp [GSState.step, hfree']
-
--- Once terminated, additional steps do not change the state.
-lemma runSteps_eq_of_terminated
-    (P : Problem) (n k : Nat)
-    (h : terminated P (GSState.runSteps P n)) :
-    GSState.runSteps P (n + k) = GSState.runSteps P n := by
-  induction k with
-  | zero =>
+    intro m h
+    exact man_proposals_le_num_of_women σ m
+  calc
+    Finset.sum (P.menFintype.elems) (proposal_length σ) ≤ Finset.sum (P.menFintype.elems) (fun _ => w_card P) := by
+      exact Finset.sum_le_sum function_ver
+    _ ≤ m_card P * w_card P:= by
       simp
-  | succ k ih =>
-      have hterm : terminated P (GSState.runSteps P (n + k)) := by
-        simpa [ih] using h
-      calc
-        GSState.runSteps P (n + Nat.succ k) =
-            GSState.step P (GSState.runSteps P (n + k)) := by
-              simp [GSState.runSteps]
-        _ = GSState.runSteps P (n + k) := by
-              simpa using step_eq_of_terminated P _ hterm
-        _ = GSState.runSteps P n := ih
+      exact Nat.le_refl (m_card P * w_card P)
+lemma m_not_free_if_proposal_length_eq_num_of_women (σ : GSState P) (m : P.Men) (h_full : proposal_length σ m = w_card P)
+: ¬ isFree P σ m := by
+  unfold isFree
+  unfold candidateWomen
+  letI := P.womenFintype
+  have stupid : w_card P = P.womenFintype.elems.card := by
+    unfold w_card
+    exact rfl
+  have finset_card_eq : proposal_length σ m = P.womenFintype.elems.card := by
+    omega
+  have finset_subset : σ.men_proposals m ⊆ P.womenFintype.elems := by
+    intro x hx
+    exact Fintype.complete x
+  have finset_eq : σ.men_proposals m = P.womenFintype.elems := by
+    unfold proposal_length at finset_card_eq
+    simp [Finset.eq_of_superset_of_card_ge finset_subset (by omega)]
+  have all_women_proposed : ∀ w : P.Women, w ∈ σ.men_proposals m := by
+    intro w
+    have w_in_finset : w ∈ P.womenFintype.elems := by
+      exact Fintype.complete w
+    grind
+  grind
+lemma all_m_proposal_length_maxed_if_proposal_count_eq_proposalBound (σ : GSState P) : proposal_count σ = proposalBound P →
+(∀ m : P.Men, proposal_length σ m = w_card P) := by
+  intro h
+  unfold proposalBound at h
+  letI := P.menFintype
+  have function_ver : ∀ m ∈ P.menFintype.elems, proposal_length σ m ≤ ((fun _ => w_card P) m) := by
+    simp
+    intro m h
+    exact man_proposals_le_num_of_women σ m
+  have thing := (Finset.sum_eq_sum_iff_of_le function_ver).mp (by aesop)
+  intro m
+  have m_in_elems : m ∈ P.menFintype.elems := by exact Fintype.complete m
+  exact thing m m_in_elems
 
--- If a runSteps state is not terminated, then the proposal count equals the step number.
-lemma proposedCount_runSteps_eq_of_not_terminated
-    (P : Problem) (n : Nat) :
-    ¬ terminated P (GSState.runSteps P n) →
-      proposedCount P (GSState.runSteps P n) = n := by
-  classical
+lemma all_m_not_free_if_proposal_count_eq_proposalBound (σ : GSState P) : proposal_count σ = proposalBound P →
+(∀ m : P.Men, ¬ isFree P σ m) := by
+  intro h
+  have maxed := all_m_proposal_length_maxed_if_proposal_count_eq_proposalBound σ h
+  intro m
+  specialize maxed m
+  exact m_not_free_if_proposal_length_eq_num_of_women σ m maxed
+
+lemma terminated_if_proposal_count_eq_proposalBound (σ : GSState P) : proposal_count σ = proposalBound P →
+terminated P σ := by
+  intro h
+  unfold terminated
+  simp
+  exact fun x => all_m_not_free_if_proposal_count_eq_proposalBound σ h x
+
+lemma galeShapley_stepWith_increase_proposal_count (σ : GSState P) (m : P.Men) (w : P.Women) (h_not_proposed : w ∉ σ.men_proposals m):
+proposal_count (GSState.stepWith P σ m w) = proposal_count σ + 1 := by
+  set new_state := GSState.stepWith P σ m w with new_state_eq
+  letI := P.menFintype
+  have neq_m_equal_length (m' : P.Men) (h_neq : m' ≠ m) : proposal_length new_state m' = proposal_length σ m' := by
+    unfold proposal_length new_state GSState.stepWith
+    have stupid : ¬ m = m' := by grind
+    split <;> split <;> simp <;> simp [stupid]
+  have m_length_plus_one : proposal_length new_state m = (proposal_length σ m) + 1 := by
+    unfold proposal_length new_state GSState.stepWith
+    simp
+    split <;> split <;> simp <;> exact Finset.card_insert_of_notMem h_not_proposed
+  have stupid : m ∈ P.menFintype.elems := by exact Fintype.complete m
+  have split_sum_old := Finset.sum_erase_add P.menFintype.elems (proposal_length σ) stupid
+  have split_sum_new := Finset.sum_erase_add P.menFintype.elems (proposal_length new_state) stupid
+  have erase_m_equal_length : ∀ m' ∈ P.menFintype.elems.erase m, proposal_length new_state m' = proposal_length σ m' := by
+    intro m' h_notin
+    have m'_neq_m : m' ≠ m := by exact Finset.ne_of_mem_erase h_notin
+    grind
+  simp [m_length_plus_one] at split_sum_new
+  unfold proposal_count
+  calc
+    _ = ∑ x ∈ Fintype.elems.erase m, proposal_length new_state x + (proposal_length σ m + 1) := by exact id (Eq.symm split_sum_new)
+    _ = (∑ x ∈ Fintype.elems.erase m, proposal_length new_state x + proposal_length σ m) + 1 := by omega
+    _ = (∑ x ∈ Fintype.elems.erase m, proposal_length σ x + proposal_length σ m) + 1 := by
+      have sum_parts_eq := Finset.sum_congr (s₁ := P.menFintype.elems.erase m) (s₂ := P.menFintype.elems.erase m) (by rfl) erase_m_equal_length
+      grind
+    _ = _ := by
+      grind
+
+lemma galeShapley_step_on_terminated_is_terminated (σ : GSState P) (h_terminated : terminated P σ)
+: terminated P (GSState.step P σ) := by
+  unfold terminated at h_terminated ⊢
+  unfold GSState.step
+  grind
+
+lemma galeShapley_n_steps_is_terminated_or_proposal_count_is_n (P : Problem) (n : Nat) :
+(terminated P (GSState.runSteps P n)) ∨ (proposal_count (GSState.runSteps P n) = n) := by
   induction n with
   | zero =>
-      intro _
-      simpa [GSState.runSteps] using proposedCount_initial P
-  | succ n ih =>
-      intro hnot
-      have hnot' : ¬ terminated P (GSState.runSteps P n) := by
-        intro hterm
-        have hEq := runSteps_eq_of_terminated P n 1 hterm
-        have : terminated P (GSState.runSteps P (n + 1)) := by
-          simpa [hEq] using hterm
-        exact hnot this
-      have hfree : ∃ m, isFree P (GSState.runSteps P n) m := by
-        by_contra hfree
-        exact hnot' (by simpa [terminated] using hfree)
-      calc
-        proposedCount P (GSState.runSteps P (n + 1)) =
-            proposedCount P (GSState.runSteps P n) + 1 := by
-              simpa [GSState.runSteps] using
-                proposedCount_step_of_free P _ hfree
-        _ = n + 1 := by
-              simp [ih hnot']
+    right
+    unfold proposal_count proposal_length GSState.runSteps GSState.initial
+    simp
+  | succ k ih =>
+    cases ih with
+    | inl h_terminated =>
+      left
+      unfold GSState.runSteps
+      exact galeShapley_step_on_terminated_is_terminated (GSState.runSteps P k) h_terminated
+    | inr h_count =>
+      unfold GSState.runSteps GSState.step
+      split_ifs
+      case pos h_free =>
+        right
+        set σ := (GSState.runSteps P k) with σ_eq
+        let m := Classical.choose h_free
+        have hm : isFree P σ m := Classical.choose_spec h_free
+        let w := chooseMaxCandidate P σ m hm.2
+        have w_candidate : w ∈ candidateWomen P σ m := by exact chooseMaxCandidate_mem P σ m hm.right
+        have w_notproposed : w ∉ σ.men_proposals m := by
+          unfold candidateWomen at w_candidate
+          grind
+        show proposal_count (GSState.stepWith P σ m w) = k + 1
+        rw [← h_count]
+        exact galeShapley_stepWith_increase_proposal_count σ m w w_notproposed
+      case neg h_notfree =>
+        left
+        unfold terminated
+        grind
+
+-- no blocking pairs
+lemma galeShapley_initial_state_satisfies_invariants (P : Problem):
+  state_satisfies_invariants (GSState.initial P) := by
+  unfold GSState.initial
+  unfold state_satisfies_invariants
+  unfold man_prefers_final_match_to_all_non_proposees
+  unfold woman_prefers_final_match_to_all_suitors
+  split_ands
+  · -- man invariants
+    intro m partner p
+    simp [partner]
+  · -- woman invariants
+    intro w partner m h
+    aesop
+
+lemma galeShapley_stepWith_woman_better_than_all_candidates_preserves_invariants (P : Problem) (σ : GSState P) (m : P.Men) (w : P.Women)
+(h_wbetter : woman_is_better_than_all_candidates σ m w) (h_wcandidate : w ∈ candidateWomen P σ m)
+(h_rational : individuallyRational P σ.matching) :
+  state_satisfies_invariants σ → state_satisfies_invariants (GSState.stepWith P σ m w) := by
+  intro h
+  have h2 := h
+  unfold state_satisfies_invariants man_prefers_final_match_to_all_non_proposees woman_prefers_final_match_to_all_suitors at h2
+  set new_state := GSState.stepWith P σ m w with new_state_eq
+  have not_m_not_w_match_matching_unaffected : ∀ m' ≠ m, σ.matching.womenMatches w ≠ (some m') →
+    new_state.matching.menMatches m' = σ.matching.menMatches m' := by
+    intro m' m'_neq_m m'_not_w_match
+    unfold new_state GSState.stepWith
+    simp
+    unfold Matching.matchUnmatched Matching.swapMatch
+    split <;> split <;> simp <;> grind
+  have not_m_proposals_unaffected : ∀ m' ≠ m, new_state.men_proposals m' = σ.men_proposals m' := by
+    unfold new_state GSState.stepWith
+    intro m' m'_neq_m
+    split <;> split <;> grind
+  have m_proposals_change_is_just_w : new_state.men_proposals m = {w} ∪ (σ.men_proposals m) := by
+    unfold new_state GSState.stepWith
+    aesop
+  have not_w_matching_unaffected : ∀ w' ≠ w, new_state.matching.womenMatches w' = σ.matching.womenMatches w' := by
+    unfold new_state GSState.stepWith
+    intro w' w'_new_w
+    simp
+    unfold Matching.matchUnmatched Matching.swapMatch
+    split <;> split <;> simp <;> grind
+  have not_w_proposals_unaffected : ∀ w' ≠ w, ∀ m : P.Men, w' ∈ new_state.men_proposals m ↔ w' ∈ σ.men_proposals m := by
+    intro w' h_neq m'
+    by_cases m_eq_m' : m = m'
+    · -- equal
+      rw [← m_eq_m']
+      grind
+    · -- not equal
+      specialize not_m_proposals_unaffected m' (by grind)
+      rw [not_m_proposals_unaffected]
+  have man_not_m_not_w_match_still_valid : ∀ m' ≠ m, σ.matching.womenMatches w ≠ (some m') →
+    man_prefers_final_match_to_all_non_proposees new_state m' := by
+      intro m' h_notm h_notwmatch
+      unfold man_prefers_final_match_to_all_non_proposees
+      specialize not_m_proposals_unaffected m' h_notm
+      specialize not_m_not_w_match_matching_unaffected m' h_notm h_notwmatch
+      grind
+  have woman_not_w_still_valid : ∀ w' ≠ w, woman_prefers_final_match_to_all_suitors new_state w' := by
+    intro w' h_neq
+    unfold woman_prefers_final_match_to_all_suitors
+    specialize not_w_matching_unaffected w' h_neq
+    simp [not_w_matching_unaffected]
+    intro m'
+    simp [not_w_proposals_unaffected w' h_neq]
+    have women_invariant := h.right
+    specialize women_invariant w' m'
+    grind
+  have new_non_proposee_of_man_is_old_non_proposee : ∀ m' : P.Men, ∀ w' ∉ new_state.men_proposals m', w' ∉ σ.men_proposals m' := by
+    intro m'
+    by_cases m'_is_m : m' = m <;> grind
+  have new_suitor_of_w_is_m_or_old_suitor : ∀ m', w ∈ new_state.men_proposals m' → (m' = m ∨ w ∈ σ.men_proposals m') := by
+    grind
+  -- easy unchanged cases done
+  -- proof for m
+  have m_match_either_old_or_w : (new_state.matching.menMatches m = σ.matching.menMatches m) ∨
+  (new_state.matching.menMatches m = some w) := by
+    unfold new_state
+    unfold GSState.stepWith
+    simp
+    unfold Matching.matchUnmatched Matching.swapMatch
+    split <;> split <;> simp
+    rename_i w_prefers
+    rename_i h_wmatch
+    rename_i w_match
+    have thing := prefersOpt_irrefl_for_explicit P.womenPrefs w m
+    have w_match_neq_m : w_match ≠ m := by
+      grind
+    grind
+  have m_valid : man_prefers_final_match_to_all_non_proposees new_state m := by
+    unfold man_prefers_final_match_to_all_non_proposees
+    cases m_match_either_old_or_w with
+    | inl h_oldmatch =>
+      simp [h_oldmatch]
+      cases h_m_match_is_none : σ.matching.menMatches m with
+      | none =>
+        simp
+      | some old_partner =>
+        simp
+        intro w' h_not_proposed_new
+        have h_not_proposed_old := new_non_proposee_of_man_is_old_non_proposee m w' h_not_proposed_new
+        have invariant := h2.left m
+        simp [h_m_match_is_none] at invariant
+        grind
+    | inr h_wmatch =>
+      simp [h_wmatch]
+      intro w' h_not_proposed_new
+      have h_not_proposed_old := new_non_proposee_of_man_is_old_non_proposee m w' h_not_proposed_new
+      by_cases w'_acceptable : P.menPrefs.acceptable m w'
+      · -- acceptable
+        have w'_candidate : w' ∈ candidateWomen P σ m := by
+          unfold candidateWomen
+          grind
+        unfold woman_is_better_than_all_candidates at h_wbetter
+        specialize h_wbetter w'
+        grind
+      · -- not acceptable
+        have w_acceptable : P.menPrefs.acceptable m w := by
+          unfold candidateWomen at h_wcandidate
+          grind
+        unfold prefersOpt
+        simp
+        grind
+  -- proof for w's old match
+  let w_match_prop : Prop :=
+    match σ.matching.womenMatches w with
+    | none => True
+    | some w_old_partner => man_prefers_final_match_to_all_non_proposees new_state w_old_partner
+  have w_match_valid : w_match_prop := by
+    unfold w_match_prop
+    cases h_w_had_match : σ.matching.womenMatches w with
+    | none => simp
+    | some w_old_partner =>
+      simp
+      unfold man_prefers_final_match_to_all_non_proposees
+      simp
+      have w_old_partner_partner_is_unchanged_or_none :
+      (new_state.matching.menMatches w_old_partner = σ.matching.menMatches w_old_partner) ∨
+      (new_state.matching.menMatches w_old_partner = none) := by
+        unfold new_state GSState.stepWith
+        simp
+        unfold Matching.matchUnmatched Matching.swapMatch
+        split <;> split <;> simp <;> grind
+      cases w_old_partner_partner_is_unchanged_or_none with
+      | inl w_old_partner_is_unchanged =>
+        simp [w_old_partner_is_unchanged]
+        cases w_old_partner_old_partner_is_some :  σ.matching.menMatches w_old_partner with
+        | none => simp
+        | some w_old_partner_old_partner =>
+          simp
+          intro w' h_not_proposed_new
+          have h_not_proposed_old := new_non_proposee_of_man_is_old_non_proposee w_old_partner w' h_not_proposed_new
+          have invariant := h2.left w_old_partner
+          simp at invariant
+          grind
+      | inr w_old_partner_is_none =>
+        grind
+
+  -- proof for w
+  have w_match_either_old_or_m : (new_state.matching.womenMatches w = σ.matching.womenMatches w) ∨
+  (new_state.matching.womenMatches w = (some m)) := by
+    unfold new_state GSState.stepWith Matching.matchUnmatched Matching.swapMatch
+    split <;> split <;> simp
+  have w_old_match_acceptable (old_match : P.Men) (is_old_match : σ.matching.womenMatches w = (some old_match)) :
+  P.womenPrefs.acceptable w old_match := by
+    unfold individuallyRational at h_rational
+    grind
+  have w_valid : woman_prefers_final_match_to_all_suitors new_state w := by
+    unfold woman_prefers_final_match_to_all_suitors
+    simp
+    intro suitor is_suitor
+    unfold new_state GSState.stepWith Matching.matchUnmatched Matching.swapMatch
+    have invariant := h2.right w
+    simp at invariant
+    split <;> split <;> simp
+    case h_1.isTrue w_old_partner_is_none w_prefers_m =>
+      -- w was matched to none previously and prefers m to none
+      by_cases m_is_suitor : m = suitor <;> simp [m_is_suitor]
+      case neg =>
+        have suitor_is_old : new_state.men_proposals suitor = σ.men_proposals suitor := by
+          grind
+        simp [suitor_is_old] at is_suitor
+        specialize invariant suitor is_suitor
+        cases invariant with
+        | inl stupid => grind
+        | inr prefers_match_to_suitor =>
+          simp [w_old_partner_is_none] at prefers_match_to_suitor
+          exact prefersOpt_acceptable_over_unacceptable P.womenPrefs w m suitor w_prefers_m prefers_match_to_suitor
+    case h_1.isFalse w_old_partner_is_none w_not_prefers_m =>
+      -- w was matched to none previously and doesn't prefer m to none
+      rw [w_old_partner_is_none]
+      simp
+      /-
+      goal state looks a bit odd (practically, show none > (some suitor)) but the key
+      is actually w_not_prefers_m so we can use the invariant
+      -/
+      by_cases m_is_suitor : m = suitor
+      case pos =>
+        unfold prefersOpt at w_not_prefers_m
+        simp at w_not_prefers_m
+        unfold prefersOpt
+        grind
+      case neg =>
+        have suitor_is_old : new_state.men_proposals suitor = σ.men_proposals suitor := by
+          grind
+        simp [suitor_is_old] at is_suitor
+        specialize invariant suitor is_suitor
+        grind
+    case h_2.isTrue w_old_partner w_old_partner_is_some w_prefers_m =>
+      -- w had a previous partner and prefers m to him
+      by_cases m_is_suitor : m = suitor
+      case pos =>
+        grind
+      case neg =>
+        simp [m_is_suitor]
+        have suitor_is_old_proposer : w ∈ σ.men_proposals suitor := by
+          grind
+        by_cases old_partner_is_suitor : w_old_partner = suitor
+        case pos =>
+          grind
+        case neg =>
+          have thing : prefersOpt P.womenPrefs w (some w_old_partner) (some suitor) := by
+            specialize invariant suitor
+            grind
+          exact prefersOpt_trans P.womenPrefs w m w_old_partner suitor ⟨w_prefers_m, thing⟩
+    case h_2.isFalse w_old_partner w_old_partner_is_some w_not_prefers_m =>
+      -- w had a previous partner and doesn't prefer m to him
+      -- should be practically the same as h_1.isFalse above, since it's really about the invariant
+      simp [w_old_partner_is_some]
+      by_cases m_is_suitor : m = suitor
+      case pos =>
+        rw [← m_is_suitor]
+        unfold prefersOpt at w_not_prefers_m
+        simp at w_not_prefers_m
+        unfold prefersOpt
+        simp
+        by_cases m_acceptable : P.womenPrefs.acceptable w m
+        case pos =>
+          simp [m_acceptable] at w_not_prefers_m
+          have prefers_old_partner_or_m := P.womenPrefs.prefers_total w m w_old_partner m_acceptable w_not_prefers_m.left
+          grind
+        case neg =>
+          grind
+      case neg =>
+        have suitor_is_old : new_state.men_proposals suitor = σ.men_proposals suitor := by
+          grind
+        simp [suitor_is_old] at is_suitor
+        specialize invariant suitor is_suitor
+        grind
+  -- finish up
+  unfold state_satisfies_invariants
+  split_ands
+  · -- men
+    intro m'
+    by_cases h_is_m : m' = m <;> grind
+  · -- women
+    intro w'
+    grind
+
+lemma galeShapley_step_preserves_invariants (P : Problem) (σ : GSState P) (h_rational : individuallyRational P σ.matching):
+  state_satisfies_invariants σ → state_satisfies_invariants (σ.step P) := by
+  intro h
+  unfold GSState.step
+  by_cases hfree : ∃ m, isFree P σ m <;> simp [hfree]
+  · -- free man exists, do step
+    set m := Classical.choose hfree
+    have hm_spec : isFree P σ m := Classical.choose_spec hfree
+    set w := chooseMaxCandidate P σ m hm_spec.2
+    show state_satisfies_invariants (GSState.stepWith P σ m w)
+    have w_better : woman_is_better_than_all_candidates σ m w := by
+      apply chooseMaxCandidate_is_best
+    have w_candidate : w ∈ candidateWomen P σ m := by
+      exact chooseMaxCandidate_mem P σ m hm_spec.right
+    exact
+      galeShapley_stepWith_woman_better_than_all_candidates_preserves_invariants P σ m w
+        w_better w_candidate h_rational h
+  · -- no free man, no step, use hypothesis
+    exact h
+
+lemma galeShapley_n_steps_satisfies_invariants (P : Problem) (n : Nat) :
+  state_satisfies_invariants (GSState.runSteps P n) := by
+  have stronger : state_satisfies_invariants (GSState.runSteps P n) ∧ individuallyRational P (GSState.runSteps P n).matching := by
+    induction n with
+    | zero =>
+      unfold GSState.runSteps
+      exact ⟨galeShapley_initial_state_satisfies_invariants P, galeShapley_initial_individually_rational P⟩
+    | succ n ih =>
+      unfold GSState.runSteps
+      have invariant := galeShapley_step_preserves_invariants P (GSState.runSteps P n) ih.right ih.left
+      have rational := galeShapley_step_preserves_individual_rationality P (GSState.runSteps P n) ih.right
+      exact ⟨invariant, rational⟩
+  exact stronger.left
 
 end
 
